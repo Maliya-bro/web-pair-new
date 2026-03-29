@@ -1,34 +1,26 @@
 modules = ["nodejs-20", "web"]
-[agent]
-expertMode = true
 
 [nix]
 channel = "stable-25_05"
+
+[deployment]
+deploymentTarget = "vm"
+run = ["sh", "-c", "npm install && node index.js"]
 
 [[ports]]
 localPort = 5000
 externalPort = 80
 
-[deployment]
-deploymentTarget = "vm"
-run = ["node", "index.js"]
-
 [workflows]
-runButton = "Project"
-
-[[workflows.workflow]]
-name = "Project"
-mode = "parallel"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Start application"
+runButton = "Start application"
 
 [[workflows.workflow]]
 name = "Start application"
-author = "agent"
+mode = "sequential"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npm start"
+args = "npm install && node index.js"
+
+[agent]
+expertMode = true
