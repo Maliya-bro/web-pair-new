@@ -1,108 +1,138 @@
-
 import fs from "fs";
 import path from "path";
 import { MongoClient } from "mongodb";
 
-const MONGODB_URI = process.env.MONGODB_URI;
-const MONGODB_DB = process.env.MONGODB_DB || "maliya_md";
-const SESSION_COLLECTION = process.env.SESSION_COLLECTION || "wa_sessions";
+const MONGODB_URI =
+  "mongodb+srv://MALIYA-MD:279221@maliya-md.spge6db.mongodb.net/?retryWrites=true&w=majority&appName=MALIYA-MD";
 
-if (!MONGODB_URI) {
-    console.warn("⚠️ MONGODB_URI is not set. MongoDB session upload will fail until you configure it.");
-}
+const MONGODB_DB = "maliya_md";
+const SESSION_COLLECTION = "wa_sessions";
 
 let cachedClient = null;
 let cachedDb = null;
 
 async function getDb() {
-    if (cachedDb) return cachedDb;
-    if (!MONGODB_URI) throw new Error("MONGODB_URI is missing");
+  if (cachedDb) return cachedDb;
 
-    cachedClient = new MongoClient(MONGODB_URI, {
-        maxPoolSize: 10,
-    });
-    await cachedClient.connect();
-    cachedDb = cachedClient.db(MONGODB_DB);
-    return cachedDb;
+  if (!MONGODB_URI) {
+    throw new Error("MONGODB_URI is missing");
+  }
+
+  cachedClient = new MongoClient(MONGODB_URI, {
+    maxPoolSize: 10,
+  });
+
+  await cachedClient.connect();
+  cachedDb = cachedClient.db(MONGODB_DB);
+  console.log("✅ Connected to MongoDB");
+  return cachedDb;
 }
 
 function fileToBase64(filePath) {
-    return fs.readFileSync(filePath).toString("base64");
-}
-
-function readFolderRecursive(dir, rootDir = dir, result = {}) {
-    if (!fs.existsSync(dir)) return result;
-
-    const items = fs.readdirSync(dir, { withFileTypes: true });
-    for (const item of items) {
-        const fullPath = path.join(dir, item.name);
-        if (item.isDirectory()) {
-            readFolderRecursive(fullPath, rootDir, result);
-        } else {
-            const relativePath = path.relative(rootDir, fullPath).replace(/\\/g, "/");
-            result[relativePath] = fileToBase64(fullPath);
-        }
-    }
-    return result;
+  return fs.readFileSync(filePath).toString("base64");
 }
 
 function normalizeSessionId(value) {
-    return String(value || "")
-        .trim()
-        .replace(/[^a-zA-Z0-9_-]/g, "_")
-        .slice(0, 120);
+  return String(value || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .slice(0, 120);
 }
 
 export async function upload(filePath, fileName, options = {}) {
-    const db = await getDb();
-    const col = db.collection(SESSION_COLLECTION);
+  const db = await getDb();
+  const col = db.collection(SESSION_COLLECTION);
 
-    const sessionId = normalizeSessionId(
-        options.sessionId || path.parse(fileName || "session").name || `session_${Date.now()}`,
-    );
-    const now = new Date();
+  const sessionId = normalizeSessionId(
+    options.sessionId ||
+      path.parse(fileName || "session").name ||
+      `session_${Date.now()}`,
+  );
 
-    const uploadDoc = {
-        sessionId,
-        fileName: fileName || path.basename(filePath),
-        primaryFile: {
-            name: fileName || path.basename(filePath),
-            mimeType: "application/json",
-            data: fileToBase64(filePath),
-        },
-        status: options.status || "ready",
-        connectBot: options.connectBot ?? true,
-        source: options.source || "pair-site",
-        phone: options.phone || null,
-        updatedAt: now,
-    };
+  const now = new Date();
 
-    if (options.sourceDir && fs.existsSync(options.sourceDir)) {
-        uploadDoc.files = readFolderRecursive(options.sourceDir);
-    }
+  const uploadDoc = {
+    sessionId,
+    fileName: fileName || path.basename(filePath),
+    primaryFile: {
+      name: fileName || path.basename(filePath),
+      mimeType: "application/json",
+      data: fileToBase64(filePath),
+    },
+    status: options.status || "ready",
+    connectBot: options.connectBot ?? true,
+    source: options.source || "pair-site",
+    phone: options.phone || null,
+    updatedAt: now,
+  };
 
-    await col.updateOne(
-        { sessionId },
-        {
-            $set: uploadDoc,
-            $setOnInsert: { createdAt: now },
-        },
-        { upsert: true },
-    );
+  await col.updateOne(
+    { sessionId },
+    {
+      $set: uploadDoc,
+      $setOnInsert: { createdAt: now },
+    },
+    { upsert: true },
+  );
 
-    return sessionId;
+  return sessionId;
 }
 
 export async function saveSessionState(options = {}) {
-    const { sessionId, phone, sourceDir, filePath, fileName, source = "pair-site" } = options;
-    if (!filePath) throw new Error("filePath is required");
+  const {
+    sessionId,
+    phone,
+    filePath,
+    fileName,
+    source = "pair-site",
+  } = options;
 
-    return upload(filePath, fileName || path.basename(filePath), {
-        sessionId,
-        phone,
-        sourceDir,
-        source,
-        status: "ready",
-        connectBot: true,
-    });
+  if (!filePath) {
+    throw new Error("filePath is required");
+  }
+
+  return upload(filePath, fileName || path.basename(filePath), {
+    sessionId,
+    phone,
+    source,
+    status: "ready",
+    connectBot: true,
+  });
+}
+
+export async function getSessionById(sessionId) {
+  const db = await getDb();
+  const col = db.collection(SESSION_COLLECTION);
+
+  return col.findOne({ sessionId: normalizeSessionId(sessionId) });
+}
+
+export async function restoreCredsToFile(sessionId, targetFilePath) {
+  const doc = await getSessionById(sessionId);
+
+  if (!doc) {
+    throw new Error(`Session not found: ${sessionId}`);
+  }
+
+  if (!doc.primaryFile?.data) {
+    throw new Error(`No primaryFile found for session: ${sessionId}`);
+  }
+
+  fs.mkdirSync(path.dirname(targetFilePath), { recursive: true });
+  fs.writeFileSync(targetFilePath, Buffer.from(doc.primaryFile.data, "base64"));
+
+  return targetFilePath;
+}
+
+export async function closeMongoConnection() {
+  try {
+    if (cachedClient) {
+      await cachedClient.close();
+    }
+  } catch (err) {
+    console.error("Error closing MongoDB connection:", err);
+  } finally {
+    cachedClient = null;
+    cachedDb = null;
+  }
 }
