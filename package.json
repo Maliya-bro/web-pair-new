@@ -17,12 +17,13 @@
     "@whiskeysockets/baileys": "latest",
     "awesome-phonenumber": "7.2.0",
     "body-parser": "^1.20.3",
+    "dotenv": "^16.6.1",
     "express": "^4.21.2",
+    "mongodb": "^6.16.0",
     "path": "^0.12.7",
     "phone": "3.1.55",
-    "pino": "9.5.0",
+    "pino": "^9.5.0",
     "qrcode": "^1.5.4",
-    "qrcode-terminal": "^0.12.0",
-    "mongodb": "^6.16.0"
+    "qrcode-terminal": "^0.12.0"
   }
 }
